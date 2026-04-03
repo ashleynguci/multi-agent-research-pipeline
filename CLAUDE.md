@@ -32,8 +32,10 @@ findings, quality-gates them, and returns a structured cited report.
 | Monorepo setup — workspaces, npm install, tsconfig | `package.json`, `pipeline/tsconfig.json`, `frontend/tsconfig.json` |
 | Environment config & gitignore | `.env.example`, `.gitignore` |
 | Shared TypeScript interfaces | `pipeline/src/types.ts` |
-| All 5 agent system prompts | `pipeline/src/prompts/planner.prompt.ts`, `researcher.ts`, `aggregator.ts`, `critic.ts`, `writer.ts` |
+| All 5 agent system prompts | `pipeline/src/prompts/planner.prompt.ts`, `researcher.prompt.ts`, `aggregator.ts`, `critic.ts`, `writer.ts` |
 | **Planner agent** (Haiku, tool_use, cost tracking, prompt cache) | `pipeline/src/agents/planner.ts` |
+| **Researcher agent** (Sonnet, web_search tool loop, max 3 rounds, cost tracking) | `pipeline/src/agents/researcher.ts` |
+| Web search tool definition + mock handler | `pipeline/src/tools/webSearch.ts` |
 | Next.js 14 + Tailwind frontend skeleton | `frontend/src/app/` |
 
 ### In progress / stubs
@@ -43,10 +45,8 @@ findings, quality-gates them, and returns a structured cited report.
 | Frontend UI | `frontend/src/app/page.tsx` | Form rendered, no handlers or SSE |
 
 ### Not yet built
-- `pipeline/src/agents/researcher.ts` — parallel web search via `Promise.allSettled`
 - `pipeline/src/agents/aggregator.ts` — Haiku pre-compression + Sonnet merge
 - `pipeline/src/agents/critic.ts` — PASS/RETRY quality gate, max retry depth 2
 - `pipeline/src/agents/writer.ts` — final structured markdown report
-- `pipeline/src/orchestrator.ts` — end-to-end pipeline wiring
-- Redis caching layer — SHA256 key, 24 h TTL
+- `pipeline/src/orchestrator.ts` — end-to-end pipeline wiring (parallel researchers, critic retry loop, Redis cache, SSE emitter)
 - SSE `/query` endpoint + frontend streaming integration
