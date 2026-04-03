@@ -1,0 +1,16 @@
+{
+  "name": "research-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "pipeline"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=pipeline\" \"npm run dev --workspace=frontend\"",
+    "build": "npm run build --workspace=pipeline && npm run build --workspace=frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
