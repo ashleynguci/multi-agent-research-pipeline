@@ -1,52 +1,70 @@
-# Multi-Agent Research Pipeline
+# research-pipeline — LLM working context
 
-An AI system that decomposes a research query into parallel specialised
-sub-tasks, runs them concurrently with live web search, synthesises
-findings, quality-gates them, and returns a structured cited report.
-
-## Architecture
-- frontend/      → Next.js 14 app with SSE progress streaming
-- pipeline/      → Node.js orchestration layer (5 agents)
-- Uses Anthropic SDK: claude-sonnet-4-6 and claude-haiku-4-5
+## What this is
+5-agent pipeline: Planner → Researchers (parallel) → Aggregator → Critic → Writer.
+Frontend streams progress via SSE. Backend is Node.js + Anthropic SDK.
 
 ## Agent roster
-1. Planner    → Haiku  · decomposes query → JSON task manifest
-2. Researcher → Sonnet · web search tool_use · runs in parallel
-3. Aggregator → Sonnet · compresses + merges researcher outputs
-4. Critic     → Haiku  · quality gate · returns PASS or RETRY + flags
-5. Writer     → Sonnet · final structured markdown report
+| # | Agent | Model | Input → Output |
+|---|---|---|---|
+| 1 | Planner | `claude-haiku-4-5-20251001` | query → `TaskManifest` (tool_use: `create_task_manifest`) |
+| 2 | Researcher | `claude-sonnet-4-6` | `Task` + query → `ResearchFindings` (web_search loop, max 3 rounds) |
+| 3 | Aggregator | `claude-sonnet-4-6` | `ResearchFindings[]` → aggregated markdown (Haiku pre-compression first) |
+| 4 | Critic | `claude-haiku-4-5-20251001` | aggregated markdown → `CriticReport` (PASS\|RETRY + flags) |
+| 5 | Writer | `claude-sonnet-4-6` | aggregated markdown + `CriticReport` → final `PipelineResult` |
 
-## Key rules
-- NEVER use Sonnet for Planner or Critic — Haiku is sufficient and 20× cheaper
-- Researcher agents run via Promise.allSettled (partial failure = OK)
-- Aggregator receives pre-compressed researcher output (Haiku pre-pass first)
-- Critic max retry depth = 2 (guard against infinite loops)
-- All agent system prompts live in pipeline/prompts/ as .ts files
-- Redis cache key = SHA256(normalised query), TTL = 24h
+## Hard rules
+- Planner + Critic = Haiku only. Never Sonnet (20× cost difference).
+- Researchers run via `Promise.allSettled` — partial failure is OK; fail only if <2 succeed.
+- Aggregator always receives Haiku-compressed researcher output (prevents context overflow).
+- Critic retry depth max = 2. On depth ≥ 2, pass flags to Writer as limitations.
+- System prompts live in `pipeline/src/prompts/*.prompt.ts` — one file per agent.
+- Cache key = `SHA256(query.toLowerCase().trim())`, TTL = 86400 s.
+- All agents return `{ ...result, cost: number }` for cost aggregation in orchestrator.
+
+## Key files
+| File | Purpose |
+|---|---|
+| `pipeline/src/types.ts` | All shared TS interfaces |
+| `pipeline/src/agents/planner.ts` | `runPlanner(query)` |
+| `pipeline/src/agents/researcher.ts` | `runResearcher(task, query)` |
+| `pipeline/src/tools/webSearch.ts` | Tool schema + mock handler (swap body for real API) |
+| `pipeline/src/orchestrator.ts` | `runPipeline(query, emit)` — **not yet built** |
+| `pipeline/src/index.ts` | HTTP server — health check stub only |
+| `frontend/src/app/page.tsx` | Search UI — form stub, no SSE wiring yet |
 
 ## Current status
 
-### Completed
-| Component | File(s) |
+### Done
+- Monorepo, tsconfig, `.env.example`, `.gitignore`
+- `pipeline/src/types.ts` — all interfaces (`Task`, `TaskManifest`, `ResearchFindings`, `Source`, `CriticReport`, `Flag`, `PipelineResult`)
+- All 5 system prompts (`pipeline/src/prompts/`)
+- `agents/planner.ts` — tool_use, cost tracking, prompt cache
+- `agents/researcher.ts` — web_search tool loop (max 3 rounds), cost tracking, prompt cache
+- `tools/webSearch.ts` — tool schema + mock handler
+- Next.js 14 + Tailwind frontend skeleton
+
+### Pending
+| File | What's needed |
 |---|---|
-| Monorepo setup — workspaces, npm install, tsconfig | `package.json`, `pipeline/tsconfig.json`, `frontend/tsconfig.json` |
-| Environment config & gitignore | `.env.example`, `.gitignore` |
-| Shared TypeScript interfaces | `pipeline/src/types.ts` |
-| All 5 agent system prompts | `pipeline/src/prompts/planner.prompt.ts`, `researcher.prompt.ts`, `aggregator.ts`, `critic.ts`, `writer.ts` |
-| **Planner agent** (Haiku, tool_use, cost tracking, prompt cache) | `pipeline/src/agents/planner.ts` |
-| **Researcher agent** (Sonnet, web_search tool loop, max 3 rounds, cost tracking) | `pipeline/src/agents/researcher.ts` |
-| Web search tool definition + mock handler | `pipeline/src/tools/webSearch.ts` |
-| Next.js 14 + Tailwind frontend skeleton | `frontend/src/app/` |
+| `agents/aggregator.ts` | Haiku pre-compression pass + Sonnet merge → markdown |
+| `agents/critic.ts` | `CriticReport` via tool_use; PASS/RETRY logic |
+| `agents/writer.ts` | Final `PipelineResult` markdown report |
+| `orchestrator.ts` | Full pipeline wiring: cache → planner → researchers → compression → aggregator → critic loop → writer → cache write |
+| `index.ts` | POST `/query` route with SSE response stream |
+| `frontend/src/app/page.tsx` | EventSource wiring, progress UI, report render |
 
-### In progress / stubs
-| Component | File(s) | Notes |
-|---|---|---|
-| Pipeline HTTP server | `pipeline/src/index.ts` | Health check only — no routes yet |
-| Frontend UI | `frontend/src/app/page.tsx` | Form rendered, no handlers or SSE |
+## SSE event schema
+```
+cache_hit          { result: PipelineResult }
+agent_start        { agent, ...meta }
+agent_done         { agent, ...meta }
+researcher_update  { taskId, status: 'running'|'done'|'failed', findings? }
+pipeline_error     { code, message }
+```
 
-### Not yet built
-- `pipeline/src/agents/aggregator.ts` — Haiku pre-compression + Sonnet merge
-- `pipeline/src/agents/critic.ts` — PASS/RETRY quality gate, max retry depth 2
-- `pipeline/src/agents/writer.ts` — final structured markdown report
-- `pipeline/src/orchestrator.ts` — end-to-end pipeline wiring (parallel researchers, critic retry loop, Redis cache, SSE emitter)
-- SSE `/query` endpoint + frontend streaming integration
+## Pricing reference
+| Model | Input | Output | Cache write | Cache read |
+|---|---|---|---|---|
+| haiku-4-5 | $0.80/MTok | $4.00/MTok | $1.00/MTok | $0.08/MTok |
+| sonnet-4-6 | $3.00/MTok | $15.00/MTok | $3.75/MTok | $0.30/MTok |
