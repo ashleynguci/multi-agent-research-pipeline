@@ -113,8 +113,9 @@ function calculateCost(usage: Anthropic.Messages.Usage): number {
 export async function runPlanner(
   query: string,
 ): Promise<TaskManifest & { cost: number }> {
-  const client = new Anthropic();
-
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY!,
+  });
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
