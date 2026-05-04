@@ -21,6 +21,7 @@ Frontend streams progress via SSE. Backend is Node.js + Anthropic SDK.
 - System prompts live in `pipeline/src/prompts/*.prompt.ts` — one file per agent.
 - Cache key = `SHA256(query.toLowerCase().trim())`, TTL = 86400 s.
 - All agents return `{ ...result, cost: number }` for cost aggregation in orchestrator.
+- When compacting, always preserve: the list of modified files, current test status, and any unresolved issues.
 
 ## Key files
 | File | Purpose |
